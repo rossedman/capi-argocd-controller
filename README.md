@@ -4,13 +4,13 @@ This controller adds clusters to ArgoCD when created by CAPI/CAPA.
 
 ## Setup
 
-I used [this blog](https://kubernetes.io/blog/2021/06/21/writing-a-controller-for-pod-labels/) for reference
+Below I am setting up a controller that will watch for cluster-api resources using the `operator-sdk` framework. This provides us with a scaffolding and testing framework to ensure our controllers work as expected and generates tons of boilerplate code for us. First, let's install the `operator-sdk` tool
 
 ```
 brew install operator-sdk
 ```
 
-Below, I'm creating a controller and referencing types that exist in CAPI. I am also skipping the creation of those resources because CAPI creates them for us.
+Below, I'm creating a controller and referencing types that exist in CAPI. I am also skipping the creation of those resources because CAPI creates them for us. This is generating a controller without CRDs.
 
 ```
 operator-sdk init \
@@ -29,4 +29,19 @@ Once we have a controller bootstrapped we need to import the types from `cluster
 
 ```
 go get sigs.k8s.io/cluster-api/api/v1beta1
+go get github.com/argoproj/argo-cd/pkg/apis/application/v1alpha1
 ```
+
+Once this is downloaded, run these commands
+
+```
+go mod tidy
+go mod download
+```
+
+Also important to note, to track resources that are not part of the core Kubernetes API or a CRD we are generating, we need to declare them in the scheme for the controller. This was added in `main.go` to track cluster api resources
+
+```
+utilruntime.Must(capi.AddToScheme(scheme))
+```
+
