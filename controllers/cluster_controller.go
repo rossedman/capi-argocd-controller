@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -71,9 +72,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// if controlplane is ready let's do some stuff
 	log.Info(fmt.Sprintf("cluster %s is ready", cluster.Name))
 
-	// TODO: retrieve cluster kubeconfig from cluster-api and create client
-
-	// create clientset from kubeconfig
+	// create clientset from kubeconfig for management cluster
 	conf, err := ctrl.GetConfig()
 	if err != nil {
 		log.Error(err, "unable to get config")
@@ -94,23 +93,24 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Connect to target cluster and create serviceaccount and rolebinding
-	clientConf, err := clientcmd.RESTConfigFromKubeConfig(secret.Data["value"])
+	// connect to target cluster and create serviceaccount and rolebinding
+	// TODO: check that value isn't empty
+	targetConf, err := clientcmd.RESTConfigFromKubeConfig(secret.Data["value"])
 	if err != nil {
 		log.Error(err, "unable to load kubeconfig for target cluster")
 		return ctrl.Result{}, err
 	}
-	clientClusterSet, err := kubernetes.NewForConfig(clientConf)
+	targetClusterConf, err := kubernetes.NewForConfig(targetConf)
 	if err != nil {
 		log.Error(err, "unable to create client config")
 		return ctrl.Result{}, err
 	}
 
-	// Create serviceaccount in target cluster
-	// TODO: Do CreateOrUpdate if serviceaccount already exists
-	_, err = clientClusterSet.CoreV1().ServiceAccounts("kube-system").Create(context.TODO(), &corev1.ServiceAccount{
+	// create serviceaccount in target cluster
+	// TODO: do CreateOrUpdate if serviceaccount already exists
+	_, err = targetClusterConf.CoreV1().ServiceAccounts("kube-system").Create(context.TODO(), &corev1.ServiceAccount{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "argocd-ctrl-test",
+			Name:      "argocd-manager",
 			Namespace: "kube-system",
 		},
 	}, v1.CreateOptions{})
@@ -119,7 +119,73 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
+	// create clusterrole
+	// TODO: check if already exists
+	_, err = targetClusterConf.RbacV1().ClusterRoles().Create(context.TODO(), &rbacv1.ClusterRole{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "argocd-manager-role",
+			Namespace: "kube-system",
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{"*"},
+				Resources: []string{"*"},
+				Verbs:     []string{"*"},
+			},
+			{
+				NonResourceURLs: []string{"*"},
+				Verbs:           []string{"*"},
+			},
+		},
+	}, v1.CreateOptions{})
+	if err != nil {
+		log.Error(err, "unable to create clusterrole")
+		return ctrl.Result{}, err
+	}
+
+	// create clusterrolebinding
+	// TODO: check if already exists
+	_, err = targetClusterConf.RbacV1().ClusterRoleBindings().Create(context.TODO(), &rbacv1.ClusterRoleBinding{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "argocd-manager-role-binding",
+			Namespace: "kube-system",
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     "argocd-manager-role",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      "argocd-manager",
+				Namespace: "kube-system",
+			},
+		},
+	}, v1.CreateOptions{})
+	if err != nil {
+		log.Error(err, "unable to create clusterrolebinding")
+		return ctrl.Result{}, err
+	}
+
 	// TODO: create argocd cluster secret in proper namespace
+	// switch back to management cluster context and create argocd cluster secret
+	_, err = clientset.CoreV1().Secrets("argocd").Create(context.TODO(), &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      fmt.Sprintf("cluster-%s", targetConf.Host),
+			Namespace: "argocd",
+		},
+		Type: "Opaque",
+		Data: map[string][]byte{
+			"config": secret.Data["value"],
+			"name":   []byte(targetConf.ServerName),
+			"server": []byte(targetConf.Host),
+		},
+	}, v1.CreateOptions{})
+	if err != nil {
+		log.Error(err, "unable to create argocd secret")
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
