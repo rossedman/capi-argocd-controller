@@ -22,11 +22,9 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 	capi "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -73,119 +71,44 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// if controlplane is ready let's do some stuff
 	log.Info(fmt.Sprintf("cluster %s is ready", cluster.Name))
 
-	// create clientset from kubeconfig for management cluster
-	conf, err := ctrl.GetConfig()
+	// create connection to management cluster
+	clientset, err := GetMgmtClusterConfig()
 	if err != nil {
-		log.Error(err, "unable to get config")
-		return ctrl.Result{}, err
-	}
-	clientset, err := kubernetes.NewForConfig(conf)
-	if err != nil {
-		log.Error(err, "unable to create client")
+		log.Error(err, "unable to create client for management cluster")
 		return ctrl.Result{}, err
 	}
 
-	// retrieve target cluster secret
-	secret, err := clientset.CoreV1().
-		Secrets(cluster.Namespace).
-		Get(context.TODO(), fmt.Sprintf("%s-kubeconfig", cluster.Name), v1.GetOptions{})
+	// create connection to target cluster
+	targetClientset, targetConf, err := GetTargetClusterConfig(clientset, cluster.Namespace, cluster.Name)
 	if err != nil {
-		log.Error(err, "unable to retrieve secret")
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// connect to target cluster
-	// TODO: check that value isn't empty
-	targetConf, err := clientcmd.RESTConfigFromKubeConfig(secret.Data["value"])
-	if err != nil {
-		log.Error(err, "unable to load kubeconfig for target cluster")
-		return ctrl.Result{}, err
-	}
-	targetClusterConf, err := kubernetes.NewForConfig(targetConf)
-	if err != nil {
-		log.Error(err, "unable to create client config")
+		log.Error(err, "unable to create client config for target cluster")
 		return ctrl.Result{}, err
 	}
 
 	// create serviceaccount in target cluster
-	// TODO: do CreateOrUpdate if serviceaccount already exists
-
-	serviceAccount, err := targetClusterConf.CoreV1().ServiceAccounts("kube-system").Get(context.TODO(), "argocd-manager", v1.GetOptions{})
+	svc, err := CreateServiceAccount(ctx, targetClientset, "argocd-manager")
 	if err != nil {
-		// TODO: feels like a code smell since its setting values on something nested
-		// that is depended on elsewhere
-		serviceAccount, err = targetClusterConf.CoreV1().ServiceAccounts("kube-system").Create(context.TODO(), &corev1.ServiceAccount{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "argocd-manager",
-				Namespace: "kube-system",
-			},
-		}, v1.CreateOptions{})
-		if err != nil {
-			log.Error(err, "unable to create serviceaccount")
-			return ctrl.Result{Requeue: true}, err
-		}
-	}
-
-	// retrieve the service account bearer token
-	var bearerToken []byte // we need this later on for ArgoCD
-	s, err := targetClusterConf.CoreV1().Secrets("kube-system").Get(context.TODO(), serviceAccount.Secrets[0].Name, v1.GetOptions{})
-	if err != nil {
-		log.Error(err, "unable to retrieve secret")
+		log.Error(err, "unable to create serviceaccount")
 		return ctrl.Result{Requeue: true}, err
 	}
-	bearerToken = s.Data["token"]
 
-	// create clusterrole
-	// TODO: check if already exists
-	if _, err = targetClusterConf.RbacV1().ClusterRoles().Get(context.TODO(), "argocd-manager-role", v1.GetOptions{}); err != nil {
-		_, err = targetClusterConf.RbacV1().ClusterRoles().Create(context.TODO(), &rbacv1.ClusterRole{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "argocd-manager-role",
-				Namespace: "kube-system",
-			},
-			Rules: []rbacv1.PolicyRule{
-				{
-					APIGroups: []string{"*"},
-					Resources: []string{"*"},
-					Verbs:     []string{"*"},
-				},
-				{
-					NonResourceURLs: []string{"*"},
-					Verbs:           []string{"*"},
-				},
-			},
-		}, v1.CreateOptions{})
-		if err != nil {
-			log.Error(err, "unable to create clusterrole")
-			return ctrl.Result{Requeue: true}, err
-		}
+	// retrieve the serviceaccount bearer token from target cluster
+	token, err := GetServiceAccountBearerToken(ctx, targetClientset, svc.Name)
+	if err != nil {
+		log.Error(err, "unable to get serviceaccount bearer token")
+		return ctrl.Result{Requeue: true}, err
 	}
 
-	// create clusterrolebinding
-	// TODO: check if needs to be updated or is out of sync
-	if _, err = targetClusterConf.RbacV1().ClusterRoleBindings().Get(context.TODO(), "argocd-manager-role-binding", v1.GetOptions{}); err != nil {
-		_, err = targetClusterConf.RbacV1().ClusterRoleBindings().Create(context.TODO(), &rbacv1.ClusterRoleBinding{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "argocd-manager-role-binding",
-				Namespace: "kube-system",
-			},
-			RoleRef: rbacv1.RoleRef{
-				APIGroup: "rbac.authorization.k8s.io",
-				Kind:     "ClusterRole",
-				Name:     "argocd-manager-role",
-			},
-			Subjects: []rbacv1.Subject{
-				{
-					Kind:      "ServiceAccount",
-					Name:      "argocd-manager",
-					Namespace: "kube-system",
-				},
-			},
-		}, v1.CreateOptions{})
-		if err != nil {
-			log.Error(err, "unable to create clusterrolebinding")
-			return ctrl.Result{}, err
-		}
+	// create clusterrolebinding in target cluster
+	if _, err := CreateOrUpdateClusterRole(ctx, targetClientset); err != nil {
+		log.Error(err, "unable to create or update clusterrole")
+		return ctrl.Result{Requeue: true}, err
+	}
+
+	// create clusterrolebinding in target cluster
+	if _, err := CreateOrUpdateClusterRoleBinding(ctx, targetClientset); err != nil {
+		log.Error(err, "unable to create or update clusterrolebinding")
+		return ctrl.Result{Requeue: true}, err
 	}
 
 	// TODO: create argocd cluster secret structure
@@ -195,7 +118,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// create config structure for argocd
 	clusterConfig := ClusterConfig{
-		BearerToken: string(bearerToken),
+		BearerToken: string(token),
 		TLSClientConfig: TLSClientConfig{
 			Insecure: false,
 			CAData:   targetConf.TLSClientConfig.CAData,
@@ -208,31 +131,46 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
+	// pass cluster labels/annotations to secret
+	// this provides metadata for our applicationsets
+	// in argocd
+	labels := cluster.GetLabels()
+	labels["argocd.argoproj.io/secret-type"] = "cluster"
+
+	// desired secret for argocd cluster
+	clusterSecret := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      fmt.Sprintf("cluster-%s", cluster.Name),
+			Namespace: "argocd",
+			Labels:    labels,
+		},
+		Type: "Opaque",
+		Data: map[string][]byte{
+			"config": data,
+			"name":   []byte(cluster.Name),
+			"server": []byte(targetConf.Host),
+		},
+	}
+
 	// create cluster secret
 	log.Info("cluster", "servername", cluster.Name, "host", targetConf.Host)
-	if _, err = clientset.CoreV1().Secrets(cluster.Namespace).Get(context.TODO(), fmt.Sprintf("cluster-%s", cluster.Name), v1.GetOptions{}); err != nil {
-		_, err = clientset.CoreV1().Secrets("argocd").Create(context.TODO(), &corev1.Secret{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      fmt.Sprintf("cluster-%s", cluster.Name),
-				Namespace: "argocd",
-				Annotations: map[string]string{
-					"managed-by": "argocd.argoproj.io",
-				},
-				Labels: map[string]string{
-					"argocd.argoproj.io/secret-type": "cluster",
-				},
-			},
-			Type: "Opaque",
-			Data: map[string][]byte{
-				"config": data,
-				"name":   []byte(cluster.Name),
-				"server": []byte(targetConf.Host),
-			},
-		}, v1.CreateOptions{})
-		if err != nil {
-			log.Error(err, "unable to create argocd secret")
-			return ctrl.Result{}, err
+	_, err = clientset.CoreV1().Secrets("argocd").Get(ctx, fmt.Sprintf("cluster-%s", cluster.Name), v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			_, err = clientset.CoreV1().Secrets("argocd").Create(ctx, clusterSecret, v1.CreateOptions{})
+			if err != nil {
+				log.Error(err, "unable to create argocd secret")
+				return ctrl.Result{}, err
+			}
 		}
+		return ctrl.Result{Requeue: true}, err
+	}
+
+	// if secret does note exist, update it with the above data no matter
+	// what information is currently in the secret.
+	if _, err := clientset.CoreV1().Secrets("argocd").Update(ctx, clusterSecret, v1.UpdateOptions{}); err != nil {
+		log.Error(err, "unable to update argocd secret")
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
@@ -244,41 +182,4 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&capi.Cluster{}).
 		Owns(&corev1.Secret{}).
 		Complete(r)
-}
-
-// In true go fashion, I spent most of my time trying to resolve go mod issues
-// so that I could import this one thing, I am now including it here directly
-// for the time being. This is sourced from ArgoCD codebase located here:
-// 		https://github.com/argoproj/argo-cd/blob/master/pkg/apis/application/v1alpha1/types.go
-type ClusterConfig struct {
-	// Server requires Basic authentication
-	Username string `json:"username,omitempty" protobuf:"bytes,1,opt,name=username"`
-	Password string `json:"password,omitempty" protobuf:"bytes,2,opt,name=password"`
-
-	// Server requires Bearer authentication. This client will not attempt to use
-	// refresh tokens for an OAuth2 flow.
-	// TODO: demonstrate an OAuth2 compatible client.
-	BearerToken string `json:"bearerToken,omitempty" protobuf:"bytes,3,opt,name=bearerToken"`
-
-	// TLSClientConfig contains settings to enable transport layer security
-	TLSClientConfig `json:"tlsClientConfig" protobuf:"bytes,4,opt,name=tlsClientConfig"`
-}
-
-// TLSClientConfig contains settings to enable transport layer security
-type TLSClientConfig struct {
-	// Insecure specifies that the server should be accessed without verifying the TLS certificate. For testing only.
-	Insecure bool `json:"insecure" protobuf:"bytes,1,opt,name=insecure"`
-	// ServerName is passed to the server for SNI and is used in the client to check server
-	// certificates against. If ServerName is empty, the hostname used to contact the
-	// server is used.
-	ServerName string `json:"serverName,omitempty" protobuf:"bytes,2,opt,name=serverName"`
-	// CertData holds PEM-encoded bytes (typically read from a client certificate file).
-	// CertData takes precedence over CertFile
-	CertData []byte `json:"certData,omitempty" protobuf:"bytes,3,opt,name=certData"`
-	// KeyData holds PEM-encoded bytes (typically read from a client certificate key file).
-	// KeyData takes precedence over KeyFile
-	KeyData []byte `json:"keyData,omitempty" protobuf:"bytes,4,opt,name=keyData"`
-	// CAData holds PEM-encoded bytes (typically read from a root certificates bundle).
-	// CAData takes precedence over CAFile
-	CAData []byte `json:"caData,omitempty" protobuf:"bytes,5,opt,name=caData"`
 }
