@@ -1,4 +1,4 @@
-module github.com/twilio-internal/capi-argocd-controller
+module github.com/project-mimosa/capi-argocd-controller
 
 go 1.17
 
@@ -6,7 +6,7 @@ require (
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.17.0
 	k8s.io/api v0.23.3
-	k8s.io/apimachinery v0.23.3
+	k8s.io/apimachinery v0.23.4
 	k8s.io/client-go v0.23.0
 	sigs.k8s.io/cluster-api v1.1.1
 	sigs.k8s.io/controller-runtime v0.11.0

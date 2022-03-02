@@ -12,9 +12,17 @@ This controller makes a few assumptions right now
 
 ## Quickstart
 
-To deploy this controller to a cluster run these commands
+To release a new image to the registry
 
+```sh
+echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_USERNAME --password-stdin
+make docker-build docker-push
 ```
+
+This will release an image to `ghcr.io/project-mimosa/capi-argocd-controller`. Once the image is created, then it can be deployed. To deploy the controller, you must be pointed at the correct cluster context you want to deploy to and then run these commands
+
+```sh
+kubectl config use-context $CLUSTER_NAME
 make docker-build docker-push deploy
 ```
 
@@ -31,7 +39,7 @@ Below, I'm creating a controller and referencing types that exist in CAPI. I am 
 ```
 operator-sdk init \
     --domain=x-k8s.io \
-    --repo=github.com/twilio-internal/capi-argocd-controller
+    --repo=github.com/project-mimosa/capi-argocd-controller
 
 operator-sdk create api \
     --group=cluster \
