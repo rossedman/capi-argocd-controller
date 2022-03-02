@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/project-mimosa/capi-argocd-controller/controllers"
+	"github.com/twilio-internal/capi-argocd-controller/controllers"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -71,6 +71,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "2a2bb41e.x-k8s.io",
+		Namespace:              "",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

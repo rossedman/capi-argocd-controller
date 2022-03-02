@@ -5,7 +5,7 @@ plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
 projectName: capi-argocd-controller
-repo: github.com/project-mimosa/capi-argocd-controller
+repo: github.com/twilio-internal/capi-argocd-controller
 resources:
 - controller: true
   domain: x-k8s.io

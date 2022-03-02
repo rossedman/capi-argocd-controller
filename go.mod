@@ -1,4 +1,4 @@
-module github.com/project-mimosa/capi-argocd-controller
+module github.com/twilio-internal/capi-argocd-controller
 
 go 1.17
 

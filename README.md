@@ -2,6 +2,22 @@
 
 This controller adds clusters to ArgoCD when created by CAPI/CAPA.
 
+## Prerequisites
+
+This controller makes a few assumptions right now
+
+- CAPI is installed in the cluster this is being deployed to
+- ArgoCD is installed in the cluster this is being deploy to
+- ArgoCD is installed in the `argocd` namespace
+
+## Quickstart
+
+To deploy this controller to a cluster run these commands
+
+```
+make docker-build docker-push deploy
+```
+
 ## Setup
 
 Below I am setting up a controller that will watch for cluster-api resources using the `operator-sdk` framework. This provides us with a scaffolding and testing framework to ensure our controllers work as expected and generates tons of boilerplate code for us. First, let's install the `operator-sdk` tool
@@ -15,7 +31,7 @@ Below, I'm creating a controller and referencing types that exist in CAPI. I am 
 ```
 operator-sdk init \
     --domain=x-k8s.io \
-    --repo=github.com/project-mimosa/capi-argocd-controller
+    --repo=github.com/twilio-internal/capi-argocd-controller
 
 operator-sdk create api \
     --group=cluster \
