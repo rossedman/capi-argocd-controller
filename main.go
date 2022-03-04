@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/twilio-internal/capi-argocd-controller/controllers"
+	"github.com/rossedman/capi-argocd-controller/controllers"
 	//+kubebuilder:scaffold:imports
 )
 

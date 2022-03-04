@@ -17,14 +17,11 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	capi "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -75,39 +72,6 @@ var _ = BeforeSuite(func() {
 	Expect(k8sClient).NotTo(BeNil())
 
 }, 60)
-
-var _ = Describe("Cluster controller", func() {
-
-	const (
-		timeout  = time.Second * 10
-		duration = time.Second * 10
-		interval = time.Millisecond * 250
-	)
-
-	Context("When cluster controlplane status is NotReady", func() {
-		It("Should return and requeue", func() {
-			capi.AddToScheme(k8sClient.Scheme())
-			cluster := &capi.Cluster{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "cluster.x-k8s.io/v1beta1",
-					Kind:       "Cluster",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-cluster01",
-					Namespace: "default",
-				},
-				Spec: capi.ClusterSpec{
-					ClusterNetwork: &capi.ClusterNetwork{
-						Pods: &capi.NetworkRanges{
-							CIDRBlocks: []string{"192.168.0.0/16"},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(context.Background(), cluster)).Should(Succeed())
-		})
-	})
-})
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
