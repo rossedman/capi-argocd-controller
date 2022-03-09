@@ -134,8 +134,13 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// pass cluster labels/annotations to secret
 	// this provides metadata for our applicationsets
 	// in argocd
-	labels := cluster.GetLabels()
+	labels := make(map[string]string)
+	// add argocd type label so cluster can be found
 	labels["argocd.argoproj.io/secret-type"] = "cluster"
+	// add labels from cluster if any exist
+	for k, v := range cluster.GetLabels() {
+		labels[k] = v
+	}
 
 	// desired secret for argocd cluster
 	clusterSecret := &corev1.Secret{
