@@ -229,7 +229,7 @@ spec:
         - --leader-elect
         command:
         - /manager
-        image: ghcr.io/rossedman/capi-argocd-controller:0.0.2
+        image: ghcr.io/rossedman/capi-argocd-controller:0.0.3
         livenessProbe:
           httpGet:
             path: /healthz
