@@ -136,6 +136,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// in argocd
 	labels := make(map[string]string)
 	// add argocd type label so cluster can be found
+	labels["kubernetes.twilio.com/cluster-type"] = "client"
 	labels["argocd.argoproj.io/secret-type"] = "cluster"
 	// add labels from cluster if any exist
 	for k, v := range cluster.GetLabels() {
